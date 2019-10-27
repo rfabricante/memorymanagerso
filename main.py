@@ -22,6 +22,9 @@ class RAM:
         self.frames[index].available = False
         self.frames[index].info = info
 
+    def free(self, index):
+        self.frames[index].available = True
+
     def getAvailablesFrames(self): 
         response = []
         for i in range(frames):
@@ -48,6 +51,13 @@ class PageTable:
     def allocate(self, frame):
         if len(self.rows) < self.max_frames: 
             self.rows.append(Row(1, 0, frame))
+
+    def getFrames(self):
+        frames = {}
+        for r in rows:
+            if r.p == 1:
+                frames[r.frame] = r.m
+        return frames
 
 class Process:
     def __init__(self, id, size):
@@ -91,7 +101,18 @@ class SO:
                     self.page_tables[process_id].allocate(frame)
                     self.ram.allocate(frame)
 
-            self.page_tables[process_id].process.state = READY    
+            self.page_tables[process_id].process.state = READY
+
+    def terminate_process(self, process_id):
+        frames = self.page_tables[process_id].getFrames()    
+        for key in frames:
+            if frames[key] == 0:
+                self.ram.free(key) 
+            else: 
+                pass
+            
+
+            
 
 def read_instructions():
     instructions = []
