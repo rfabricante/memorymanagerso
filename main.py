@@ -82,7 +82,7 @@ class SO:
     def create_process(self, process_id, size):
         process = Process(process_id, size)
         page_table = PageTable(process)  
-        self.page_tables = {process_id: page_table}
+        self.page_tables[process_id] = page_table
         available_frames = self.ram.getAvailablesFrames()
         if len(available_frames) > 0: 
             for i in range(process.num_frames):
@@ -90,7 +90,7 @@ class SO:
                     frame = available_frames[i]
                     self.page_tables[process_id].allocate(frame)
                     self.ram.allocate(frame)
-                    
+
             self.page_tables[process_id].process.state = READY    
 
 def read_instructions():
