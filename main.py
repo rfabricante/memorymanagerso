@@ -2,6 +2,7 @@ import math
 
 NEW = "NEW"
 READY = "READY"
+FINISHED = "FINISHED"
 
 frame_size = 128
 mp_size = 8 * 1024
@@ -9,18 +10,22 @@ ms_size = 32 * 1024
 num_frames_per_page = 20 
 
 class Frame:
-    def __init__(self, available, info):
+    def __init__(self, available, info, process_id="", u=1):
         self.available = available
         self.info = info
+        self.u = u
+        self.process_id = process_id
 
 class RAM:
     def __init__(self, size):
         self.size = size
         self.frames = [Frame(True, 0)] * (size/frame_size)
+        self.pointer = 0
 
     def allocate(self, index, info=0): 
         self.frames[index].available = False
         self.frames[index].info = info
+        self.pointer = index
 
     def free(self, index):
         self.frames[index].available = True
@@ -59,6 +64,20 @@ class PageTable:
                 frames[r.frame] = r.m
         return frames
 
+    def get_row_by_frame_index(self, index): 
+        for row in self.rows:
+            if row.frame == index:
+                return row
+
+    def set_row(self, page_number, frame):
+        if self.rows >= page_number:
+            self.rows[page_number].frame = frame
+            self.rows[page_number].p = 1
+            return
+
+        print("Invalid row {} for process {}. Exiting...".format(page_number, self.process))
+        raise SystemExit()
+
 class Process:
     def __init__(self, id, size):
         self.id = id
@@ -84,7 +103,7 @@ class SO:
         elif command == 'W':
             pass 
         elif command == 'T':
-            pass
+            self.terminate_process(process_id)
         else:
             print("Invalid command '{}'. Exiting...".format(command))
             raise SystemExit()
@@ -102,6 +121,9 @@ class SO:
                     self.ram.allocate(frame)
 
             self.page_tables[process_id].process.state = READY
+            return
+        
+
 
     def terminate_process(self, process_id):
         frames = self.page_tables[process_id].getFrames()    
@@ -110,9 +132,27 @@ class SO:
                 self.ram.free(key) 
             else: 
                 pass
-            
 
-            
+        self.page_tables[process_id].state = FINISHED
+        
+
+    def u_clock(self, page_table, page_number):
+        for f in self.ram.frames:
+            pointer = self.ram.pointer % len(self.ram.frames)
+            current_frame = self.ram.frames[pointer]
+            if current_frame.u == 0:
+                process_id = current_frame.process_id
+                row = self.page_tables[process_id].get_row_by_frame_index(pointer)
+                if row.m == 0:
+                    row.p = 0
+                    page_table.set_row(page_number, pointer)
+                    self.ram.pointer += 1
+                else: 
+                    pass
+            elif current_frame.u == 1: 
+                current_frame.u = 0
+                self.ram.pointer += 1
+
 
 def read_instructions():
     instructions = []
@@ -132,3 +172,4 @@ if __name__ == '__main__':
 # 8 GB MP
 # 256 GB MS
 # 20 quadros por processo
+
