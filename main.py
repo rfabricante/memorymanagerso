@@ -3,11 +3,12 @@ import math
 NEW = "NEW"
 READY = "READY"
 FINISHED = "FINISHED"
+SUSPENDED = "SUSPENDED"
 
 frame_size = 128
-mp_size = 8 * 1024
+mp_size = 512
 ms_size = 32 * 1024
-num_frames_per_page = 20 
+num_pages_per_process = 16 
 
 class Frame:
     def __init__(self, available, info, process_id="", u=1):
@@ -19,21 +20,21 @@ class Frame:
 class RAM:
     def __init__(self, size):
         self.size = size
-        self.frames = [Frame(True, 0)] * (size/frame_size)
+        self.frames = [None] * int(size/frame_size)
         self.pointer = 0
 
-    def allocate(self, index, info=0): 
-        self.frames[index].available = False
-        self.frames[index].info = info
-        self.pointer = index
+    def allocate(self, index, process_id, info=0): 
+        frame = Frame(False, info, process_id)
+        self.frames[index] = frame
+        self.pointer = index + 1
 
     def free(self, index):
         self.frames[index].available = True
 
-    def getAvailablesFrames(self): 
+    def get_available_frames(self): 
         response = []
-        for i in range(frames):
-            if frames[i].available:
+        for i in range(len(self.frames)):
+            if self.frames[i] == None or self.frames[i].available:
                 response.append(i)
         return response
 
@@ -42,24 +43,32 @@ class HD:
         self.size = size
 
 class Row:
-    def __init__(self, p, m, framse):
-        self.p = 0
-        self.m = 0
-        self.frame = -1
+    def __init__(self, p, m, frame=-1):
+        self.p = p
+        self.m = m
+        self.frame = frame
+
+    def __str__(self):
+        return "{} {} {}".format(self.p, self.m, self.frame)
 
 class PageTable:
     def __init__(self, process):
         self.process = process
-        self.max_frames = num_frames_per_page
-        self.rows = []
+        self.max_frames = num_pages_per_process
+        self.rows = [None] * self.max_frames
 
-    def allocate(self, frame):
-        if len(self.rows) < self.max_frames: 
-            self.rows.append(Row(1, 0, frame))
+    def allocate(self, index, frame):
+        if index < self.max_frames:
+            row = Row(1, 0, frame)
+            self.rows[index] = row
+            return
 
-    def getFrames(self):
+        print("Invalid row {} for process {}. Exiting...".format(index, self.process.id))
+        raise SystemExit()
+
+    def get_frames(self):
         frames = {}
-        for r in rows:
+        for r in self.rows:
             if r.p == 1:
                 frames[r.frame] = r.m
         return frames
@@ -69,14 +78,21 @@ class PageTable:
             if row.frame == index:
                 return row
 
-    def set_row(self, page_number, frame):
-        if self.rows >= page_number:
-            self.rows[page_number].frame = frame
-            self.rows[page_number].p = 1
-            return
+    def is_suspended(self):
+        for row in self.rows:
+            if row == None:
+                continue
+            if row.p == 1:
+                return False
+        return True
 
-        print("Invalid row {} for process {}. Exiting...".format(page_number, self.process))
-        raise SystemExit()
+    def __str__(self):
+        string = "Table for process {}:\n".format(self.process.id)
+        for i in range(len(self.rows)):
+            string += "{}\n".format(self.rows[i])
+
+        return string 
+        
 
 class Process:
     def __init__(self, id, size):
@@ -84,6 +100,9 @@ class Process:
         self.state = NEW
         self.size = size 
         self.num_frames = math.ceil(size/frame_size)
+
+    def __str__(self): 
+        return "Process with id {} and size {} is {}".format(self.id, self.size, self.state)
 
 class SO:
     def __init__(self):
@@ -97,7 +116,7 @@ class SO:
         elif command == 'I':
             pass
         elif command == 'C':
-            self.create_process(process_id, inst)
+            self.create_process(process_id, int(*inst))
         elif command == 'R':
             pass
         elif command == 'W':
@@ -108,36 +127,41 @@ class SO:
             print("Invalid command '{}'. Exiting...".format(command))
             raise SystemExit()
 
+        print(self.page_tables[process_id].process)
+        print(self.page_tables[process_id])
+
     def create_process(self, process_id, size):
+        print('Creating process {}'.format(process_id))
         process = Process(process_id, size)
         page_table = PageTable(process)  
         self.page_tables[process_id] = page_table
-        available_frames = self.ram.getAvailablesFrames()
+        available_frames = self.ram.get_available_frames()
         if len(available_frames) > 0: 
             for i in range(process.num_frames):
                 if len(available_frames) > i:
                     frame = available_frames[i]
-                    self.page_tables[process_id].allocate(frame)
-                    self.ram.allocate(frame)
-
-            self.page_tables[process_id].process.state = READY
-            return
+                    self.page_tables[process_id].allocate(i, frame)
+                    self.ram.allocate(frame, process_id)
+        else: 
+            print("No available frame")
+            self.u_clock(page_table, 0)
         
-
+        self.page_tables[process_id].process.state = READY
 
     def terminate_process(self, process_id):
-        frames = self.page_tables[process_id].getFrames()    
+        print('Finishing process {}'.format(process_id))
+        frames = self.page_tables[process_id].get_frames()    
         for key in frames:
             if frames[key] == 0:
                 self.ram.free(key) 
             else: 
                 pass
-
-        self.page_tables[process_id].state = FINISHED
+        self.page_tables[process_id].process.state = FINISHED
         
 
     def u_clock(self, page_table, page_number):
-        for f in self.ram.frames:
+        process_id = "" 
+        while True:
             pointer = self.ram.pointer % len(self.ram.frames)
             current_frame = self.ram.frames[pointer]
             if current_frame.u == 0:
@@ -145,18 +169,23 @@ class SO:
                 row = self.page_tables[process_id].get_row_by_frame_index(pointer)
                 if row.m == 0:
                     row.p = 0
-                    page_table.set_row(page_number, pointer)
+                    page_table.allocate(page_number, pointer)
                     self.ram.pointer += 1
                 else: 
                     pass
+                break
             elif current_frame.u == 1: 
                 current_frame.u = 0
                 self.ram.pointer += 1
+        if self.page_tables[process_id].is_suspended(): 
+            print("Suspending process {}".format(process_id))
+            self.page_tables[process_id].process.state = SUSPENDED
+            
 
 
 def read_instructions():
     instructions = []
-    for i in range(1):
+    for i in range(3):
         instructions.append(input())
     return instructions
 
